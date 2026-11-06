@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bibi Maze</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --yellow: #ffe000;
+      --blue: #1027b8;
+      --pink: #ff6b9d;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 24px;
+      background: #080b20;
+      color: #fff;
+      font: 16px/1.5 system-ui, sans-serif;
+    }
+
+    main { width: min(680px, 100%); margin: 0 auto; }
+
+    h1 {
+      margin: 0 0 4px;
+      color: var(--yellow);
+      text-align: center;
+      letter-spacing: 2px;
+    }
+
+    .subtitle, .help { text-align: center; color: #c4c9e7; }
+
+    .search {
+      display: flex;
+      gap: 8px;
+      margin: 20px 0;
+    }
+
+    .search input {
+      flex: 1;
+      min-width: 0;
+      padding: 12px 14px;
+      border: 2px solid #5363c8;
+      border-radius: 8px;
+      background: #111735;
+      color: white;
+      font: inherit;
+    }
+
+    button {
+      padding: 10px 16px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--yellow);
+      color: #111;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 700;
+    }
+
+    button:hover { filter: brightness(1.1); }
+
+    .status {
+      display: flex;
+      justify-content: space-between;
+      margin: 8px 0;
+      color: var(--yellow);
+      font-weight: 700;
+    }
+
+    .board-wrap {
+      position: relative;
+      overflow: hidden;
+      border: 3px solid #3348d2;
+      border-radius: 8px;
+      background: #000;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      image-rendering: pixelated;
+    }
+
+    #message {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: #05081dcc;
+      text-align: center;
+      font-size: clamp(20px, 5vw, 32px);
+      font-weight: 800;
+    }
+
+    #message[hidden] { display: none; }
+
+    .legend {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin: 14px 0;
+      color: #e0e3f7;
+    }
+
+    .legend span { white-space: nowrap; }
+    .dot { color: var(--yellow); }
+    .dad { color: #ff5374; }
+    .grandma { color: #ff9a42; }
+    .child { color: #56e6e9; }
+
+    .help { font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>BIBI MAZE</h1>
+    <div class="subtitle">A classic maze chase with a political-cartoon twist</div>
+
+    <form class="search" action="https://duckduckgo.com/" method="get" target="_blank">
+      <input name="q" type="search" placeholder="Search the web with DuckDuckGo…" aria-label="Search DuckDuckGo" required>
+      <button type="submit">Search</button>
+    </form>
+
+    <div class="status">
+      <span>Score: <span id="score">0</span></span>
+      <span id="lives">Lives: 3</span>
+    </div>
+
+    <div class="board-wrap">
+      <canvas id="game" aria-label="Pac-Man-style maze game"></canvas>
+      <div id="message" hidden></div>
+    </div>
+
+    <div class="legend">
+      <span class="dot">● Dots</span>
+      <span class="dad">● Dad</span>
+      <span class="grandma">● Grandma</span>
+      <span class="child">● Child</span>
+    </div>
+    <div class="help">Use arrow keys or WASD to move. Eat the big dots to turn the Family Twerk Factory blue and chase them away. Press Enter to start or restart.</div>
+  </main>
+
+  <script>
+    (() => {
+      const originalMap = [
+        "###############",
+        "#.............#",
+        "#.###.###.###.#",
+        "#o#...#.#...#o#",
+        "#.###.#.#.###.#",
+        "#.....#.#.....#",
+        "#####.#.#.#####",
+        "#.............#",
+        "#.###.###.###.#",
+        "#...#.....#...#",
+        "###.#.###.#.###",
+        "#...#.....#...#",
+        "#.###.#.#.###.#",
+        "#o....#.#....o#",
+        "###############"
+      ];
+
+      const canvas = document.getElementById("game");
+      const ctx = canvas.getContext("2d");
+      const scoreEl = document.getElementById("score");
+      const livesEl = document.getElementById("lives");
+      const messageEl = document.getElementById("message");
+
+      const TILE = 32;
+      const ROWS = originalMap.length;
+      const COLS = originalMap[0].length;
+      canvas.width = COLS * TILE;
+      canvas.height = ROWS * TILE;
+
+      const playerStart = { x: 1, y: 13 };
+      const ghostStarts = [
+        { x: 6, y: 7, name: "Dad", color: "#ff5374" },
+        { x: 7, y: 7, name: "Grandma", color: "#ff9a42" },
+        { x: 8, y: 7, name: "Child", color: "#56e6e9" }
+      ];
+
+      let map, player, ghosts, score, lives, powerTicks, running, gameOver;
+      let tickCount = 0;
+      let queuedDirection = { x: 0, y: 0 };
+      let timer;
+
+      function resetGame() {
+        map = originalMap.map(row => row.split(""));
+        player = { ...playerStart, direction: { x: 0, y: 0 } };
+        ghosts = ghostStarts.map(g => ({ ...g, x: g.x, y: g.y, homeX: g.x, homeY: g.y }));
+        score = 0;
+        lives = 3;
+        powerTicks = 0;
+        running = true;
+        gameOver = false;
+        queuedDirection = { x: 0, y: 0 };
+        messageEl.hidden = true;
+        updateStatus();
+        draw();
+      }
+
+      function updateStatus() {
+        scoreEl.textContent = score;
+        livesEl.textContent = `Lives: ${lives}`;
+      }
+
+      function isOpen(x, y) {
+        return y >= 0 && y < ROWS && x >= 0 && x < COLS && map[y][x] !== "#";
+      }
+
+      function moveEntity(entity, dir) {
+        const nx = entity.x + dir.x;
+        const ny = entity.y + dir.y;
+        if (isOpen(nx, ny)) {
+          entity.x = nx;
+          entity.y = ny;
+          return true;
+        }
+        return false;
+      }
+
+      function showMessage(text) {
+        running = false;
+        gameOver = true;
+        messageEl.innerHTML = `${text}<br><small>Press Enter to play again</small>`;
+        messageEl.hidden = false;
+      }
+
+      function collectTile() {
+        const tile = map[player.y][player.x];
+        if (tile === ".") {
+          score += 10;
+          map[player.y][player.x] = " ";
+        } else if (tile === "o") {
+          score += 50;
+          powerTicks = 55;
+          map[player.y][player.x] = " ";
+        }
+
+        if (map.every(row => row.every(cell => cell !== "." && cell !== "o"))) {
+          updateStatus();
+          draw();
+          showMessage("You cleared the maze!");
+          return;
+        }
+        updateStatus();
+      }
+
+      function collideWithGhosts() {
+        for (const ghost of ghosts) {
+          if (ghost.x !== player.x || ghost.y !== player.y) continue;
+
+          if (powerTicks > 0) {
+            score += 200;
+            ghost.x = ghost.homeX;
+            ghost.y = ghost.homeY;
+            updateStatus();
+          } else {
+            lives--;
+            updateStatus();
+            if (lives <= 0) {
+              draw();
+              showMessage("The Family Twerk Factory got you!");
+              return;
+            }
+            player = { ...playerStart, direction: { x: 0, y: 0 } };
+            ghosts.forEach(g => { g.x = g.homeX; g.y = g.homeY; });
+            powerTicks = 0;
+            break;
+          }
+        }
+      }
+
+      function moveGhost(ghost) {
+        const options = [
+          { x: 1, y: 0 }, { x: -1, y: 0 },
+          { x: 0, y: 1 }, { x: 0, y: -1 }
+        ].filter(dir => isOpen(ghost.x + dir.x, ghost.y + dir.y));
+
+        if (!options.length) return;
+
+        if (powerTicks > 0 && Math.random() < 0.8) {
+          const dir = options[Math.floor(Math.random() * options.length)];
+          ghost.x += dir.x;
+          ghost.y += dir.y;
+          return;
+        }
+
+        options.sort((a, b) => {
+          const da = Math.abs(ghost.x + a.x - player.x) + Math.abs(ghost.y + a.y - player.y);
+          const db = Math.abs(ghost.x + b.x - player.x) + Math.abs(ghost.y + b.y - player.y);
+          return da - db + (Math.random() - 0.5) * 1.4;
+        });
+
+        ghost.x += options[0].x;
+        ghost.y += options[0].y;
+      }
+
+      function step() {
+        if (!running) return;
+
+        if (isOpen(player.x + queuedDirection.x, player.y + queuedDirection.y)) {
+          player.direction = { ...queuedDirection };
+        }
+        moveEntity(player, player.direction);
+        collectTile();
+        if (!running) return;
+
+        tickCount++;
+        if (tickCount % 2 === 0) {
+          ghosts.forEach(moveGhost);
+        }
+
+        collideWithGhosts();
+        if (powerTicks > 0) powerTicks--;
+        draw();
+      }
+
+      function drawPlayer(cx, cy) {
+        const mouth = Math.sin(Date.now() / 90) * 0.18 + 0.28;
+        const facing = player.direction.x < 0 ? Math.PI :
+                       player.direction.y < 0 ? -Math.PI / 2 :
+                       player.direction.y > 0 ? Math.PI / 2 : 0;
+
+        ctx.fillStyle = "#ffe000";
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, TILE * 0.38, facing + mouth, facing + Math.PI * 2 - mouth);
+        ctx.closePath();
+        ctx.fill();
+
+        // Tiny suit-and-tie detail for the cartoon player.
+        ctx.fillStyle = "#14265d";
+        ctx.fillRect(cx - 3, cy + 2, 6, 8);
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(cx - 1, cy + 2, 2, 5);
+      }
+
+      function drawGhost(ghost) {
+        const cx = ghost.x * TILE + TILE / 2;
+        const cy = ghost.y * TILE + TILE / 2;
+        const color = powerTicks > 0 ? (powerTicks < 12 && tickCount % 2 ? "#fff" : "#274be8") : ghost.color;
+
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(cx, cy - 2, TILE * 0.34, Math.PI, 0);
+        ctx.lineTo(cx + TILE * 0.34, cy + TILE * 0.3);
+        ctx.lineTo(cx + TILE * 0.17, cy + TILE * 0.2);
+        ctx.lineTo(cx, cy + TILE * 0.3);
+        ctx.lineTo(cx - TILE * 0.17, cy + TILE * 0.2);
+        ctx.lineTo(cx - TILE * 0.34, cy + TILE * 0.3);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.arc(cx - 5, cy - 2, 4, 0, Math.PI * 2);
+        ctx.arc(cx + 5, cy - 2, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#111";
+        ctx.beginPath();
+        ctx.arc(cx - 4, cy - 2, 2, 0, Math.PI * 2);
+        ctx.arc(cx + 6, cy - 2, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      function draw() {
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        for (let y = 0; y < ROWS; y++) {
+          for (let x = 0; x < COLS; x++) {
+            const tile = map[y][x];
+            const px = x * TILE;
+            const py = y * TILE;
+
+            if (tile === "#") {
+              ctx.fillStyle = "#1427a8";
+              ctx.fillRect(px, py, TILE, TILE);
+              ctx.strokeStyle = "#4058ff";
+              ctx.lineWidth = 2;
+              ctx.strokeRect(px + 2, py + 2, TILE - 4, TILE - 4);
+            } else if (tile === ".") {
+              ctx.fillStyle = "#ffe9a8";
+              ctx.beginPath();
+              ctx.arc(px + TILE / 2, py + TILE / 2, 3, 0, Math.PI * 2);
+              ctx.fill();
+            } else if (tile === "o") {
+              ctx.fillStyle = "#fff";
+              ctx.beginPath();
+              ctx.arc(px + TILE / 2, py + TILE / 2, 7, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+        }
+
+        drawPlayer(player.x * TILE + TILE / 2, player.y * TILE + TILE / 2);
+        ghosts.forEach(drawGhost);
+      }
+
+      const keyDirections = {
+        ArrowUp: { x: 0, y: -1 }, w: { x: 0, y: -1 },
+        ArrowDown: { x: 0, y: 1 }, s: { x: 0, y: 1 },
+        ArrowLeft: { x: -1, y: 0 }, a: { x: -1, y: 0 },
+        ArrowRight: { x: 1, y: 0 }, d: { x: 1, y: 0 }
+      };
+
+      document.addEventListener("keydown", event => {
+        if (event.key === "Enter" && gameOver) {
+          resetGame();
+          return;
+        }
+        const dir = keyDirections[event.key] || keyDirections[event.key.toLowerCase()];
+        if (dir) {
+          event.preventDefault();
+          queuedDirection = dir;
+        }
+      });
+
+      resetGame();
+      timer = setInterval(step, 135);
+      window.addEventListener("beforeunload", () => clearInterval(timer));
+    })();
+  </script>
+</body>
+</html>
